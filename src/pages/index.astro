@@ -1,0 +1,101 @@
+---
+import { Image } from 'astro:assets';
+import trees from '../assets/trees.jpg';
+
+const title = 'Crown Shy Press';
+const description = 'Crown Shy Press is an independent press.';
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="generator" content={Astro.generator} />
+		<meta name="description" content={description} />
+		<meta name="theme-color" content="#ffffff" />
+		<meta property="og:type" content="website" />
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:url" content="https://crownshypress.com/" />
+		<meta name="twitter:card" content="summary" />
+		<meta name="twitter:title" content={title} />
+		<meta name="twitter:description" content={description} />
+		<link rel="canonical" href="https://crownshypress.com/" />
+		<title>{title}</title>
+	</head>
+	<body>
+		<main>
+			<h1>{title}</h1>
+			<Image
+				src={trees}
+				alt="Bare trees reaching into a cloudy winter sky"
+				width={1080}
+				widths={[320, 480, 640, 840, 1080]}
+				sizes="(max-width: 640px) calc(100vw - 48px), min(58vw, 680px)"
+				format="webp"
+				quality={86}
+				loading="eager"
+				fetchpriority="high"
+				decoding="async"
+			/>
+		</main>
+	</body>
+</html>
+
+<style>
+	:global(*) {
+		box-sizing: border-box;
+	}
+
+	:global(html) {
+		background: #fff;
+		color-scheme: light;
+	}
+
+	:global(body) {
+		margin: 0;
+		min-width: 20rem;
+		min-height: 100svh;
+		background: #fff;
+	}
+
+	main {
+		display: grid;
+		min-height: 100svh;
+		place-items: center;
+		padding: clamp(1.5rem, 6vw, 5rem);
+	}
+
+	h1 {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	img {
+		display: block;
+		width: min(58vw, 42.5rem);
+		max-width: 100%;
+		max-height: calc(100svh - clamp(3rem, 12vw, 10rem));
+		height: auto;
+		object-fit: contain;
+	}
+
+	@media (max-width: 40rem) {
+		main {
+			padding: 1.5rem;
+		}
+
+		img {
+			width: 100%;
+			max-height: calc(100svh - 3rem);
+		}
+	}
+</style>
