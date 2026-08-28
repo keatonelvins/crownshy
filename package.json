@@ -20,5 +20,8 @@
     "onlyBuiltDependencies": [
       "esbuild"
     ]
+  },
+  "devDependencies": {
+    "wrangler": "^4.127.0"
   }
 }
