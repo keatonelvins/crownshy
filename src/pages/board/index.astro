@@ -69,6 +69,24 @@ const fixtureImageUrl = import.meta.env.DEV ? trees.src : undefined;
 						<span aria-hidden="true">+</span>
 					</button>
 				</div>
+
+				<div class="celebration" id="celebration" aria-hidden="true" hidden>
+					<img
+						class="celebration-image"
+						id="celebration-image"
+						data-src="/board/celebration.gif"
+						alt=""
+					/>
+					<div class="celebration-words" aria-hidden="true">
+						<span>GOOD JOB</span>
+						<span>GOOD JOB</span>
+						<span>GOOD JOB</span>
+						<span>GOOD JOB</span>
+						<span>GOOD JOB</span>
+						<span>GOOD JOB</span>
+					</div>
+				</div>
+				<p class="visually-hidden" id="celebration-announcement" role="status"></p>
 			</section>
 		</main>
 
@@ -127,6 +145,10 @@ const fixtureImageUrl = import.meta.env.DEV ? trees.src : undefined;
 				getElement<HTMLSpanElement>('writing-light-1'),
 				getElement<HTMLSpanElement>('writing-light-2'),
 			] as const;
+			const celebration = getElement<HTMLDivElement>('celebration');
+			const celebrationImage = getElement<HTMLImageElement>('celebration-image');
+			const celebrationAnnouncement = getElement<HTMLParagraphElement>('celebration-announcement');
+			const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 			const statusElement = getElement<HTMLParagraphElement>('status');
 			const addControls = getElement<HTMLDivElement>('add-controls');
 			const addButton = getElement<HTMLButtonElement>('add-button');
@@ -155,6 +177,9 @@ const fixtureImageUrl = import.meta.env.DEV ? trees.src : undefined;
 				lights: [false, false],
 			};
 			let submittingWriting = false;
+			let writingStatusReady = false;
+			let completedWritingDate: string | null = null;
+			let celebrationTimeout: number | undefined;
 			const hiddenItemIds = new Set<string>();
 
 			function getElement<T extends HTMLElement>(id: string): T {
@@ -190,7 +215,48 @@ const fixtureImageUrl = import.meta.env.DEV ? trees.src : undefined;
 				}
 			}
 
+			function prepareCelebrationImage() {
+				const source = celebrationImage.dataset.src;
+				if (!prefersReducedMotion.matches && source && !celebrationImage.hasAttribute('src')) {
+					celebrationImage.src = source;
+				}
+			}
+
+			function showCelebration() {
+				if (celebrationTimeout !== undefined) window.clearTimeout(celebrationTimeout);
+
+				celebration.hidden = true;
+				if (!prefersReducedMotion.matches) {
+					const source = celebrationImage.dataset.src;
+					if (source) {
+						celebrationImage.removeAttribute('src');
+						void celebrationImage.offsetWidth;
+						celebrationImage.src = source;
+					}
+				}
+				void celebration.offsetWidth;
+				celebration.hidden = false;
+
+				celebrationAnnouncement.textContent = '';
+				window.requestAnimationFrame(() => {
+					celebrationAnnouncement.textContent = 'GOOD JOB! We did it!';
+				});
+
+				celebrationTimeout = window.setTimeout(() => {
+					celebration.hidden = true;
+					celebrationImage.removeAttribute('src');
+					celebrationTimeout = undefined;
+				}, 3_600);
+			}
+
 			function renderWritingStatus(status: WritingStatus) {
+				const shouldCelebrate =
+					writingStatusReady &&
+					writingStatus.date === status.date &&
+					writingStatus.completed < 2 &&
+					status.completed >= 2 &&
+					completedWritingDate !== status.date;
+				if (status.completed >= 2) completedWritingDate = status.date;
 				writingStatus = status;
 				for (const [index, light] of writingLights.entries()) {
 					const complete = status.lights[index] ?? false;
@@ -198,7 +264,10 @@ const fixtureImageUrl = import.meta.env.DEV ? trees.src : undefined;
 					light.setAttribute('aria-label', `Submission ${index + 1} ${complete ? 'complete' : 'pending'}`);
 				}
 				writingContent.disabled = !authenticated || status.completed >= 2;
-				writingMessage.textContent = status.completed >= 2 ? 'both in' : '';
+				writingMessage.textContent = status.completed >= 2 ? 'we did it!!!' : '';
+				if (status.completed === 1) prepareCelebrationImage();
+				if (shouldCelebrate) showCelebration();
+				writingStatusReady = true;
 				updateWritingSubmitState();
 			}
 
@@ -811,6 +880,118 @@ const fixtureImageUrl = import.meta.env.DEV ? trees.src : undefined;
 		color: #555552;
 	}
 
+	.celebration {
+		position: absolute;
+		inset: 0;
+		z-index: 3;
+		display: grid;
+		overflow: hidden;
+		place-items: center;
+		background: rgb(5 5 5 / 20%);
+		pointer-events: none;
+	}
+
+	.celebration[hidden] {
+		display: none;
+	}
+
+	.celebration-image {
+		width: min(18rem, 62vw);
+		max-height: 72%;
+		border: 1px solid rgb(255 255 255 / 24%);
+		box-shadow: 0 1rem 4rem rgb(0 0 0 / 55%);
+		object-fit: cover;
+		animation: celebration-pop 420ms ease-out both;
+	}
+
+	.celebration-words {
+		position: absolute;
+		inset: 0;
+		overflow: hidden;
+	}
+
+	.celebration-words span {
+		--drift: 0rem;
+		--spin: 0deg;
+		position: absolute;
+		bottom: -2.5rem;
+		left: 50%;
+		color: #fff;
+		font-size: clamp(1.1rem, 4vw, 2.4rem);
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		white-space: nowrap;
+		text-shadow: 0 0.15rem 0.8rem rgb(0 0 0 / 60%);
+		animation: celebration-rise 2.25s cubic-bezier(0.2, 0.72, 0.2, 1) both;
+	}
+
+	.celebration-words span:nth-child(1) {
+		--drift: -0.5rem;
+		--spin: -8deg;
+		left: 20%;
+	}
+
+	.celebration-words span:nth-child(2) {
+		--drift: 1rem;
+		--spin: 7deg;
+		left: 32%;
+		animation-delay: 180ms;
+	}
+
+	.celebration-words span:nth-child(3) {
+		--drift: -0.5rem;
+		--spin: -4deg;
+		left: 44%;
+		animation-delay: 400ms;
+	}
+
+	.celebration-words span:nth-child(4) {
+		--drift: 1.25rem;
+		--spin: 9deg;
+		left: 56%;
+		animation-delay: 620ms;
+	}
+
+	.celebration-words span:nth-child(5) {
+		--drift: -1rem;
+		--spin: -6deg;
+		left: 68%;
+		animation-delay: 840ms;
+	}
+
+	.celebration-words span:nth-child(6) {
+		--drift: 0.5rem;
+		--spin: 5deg;
+		left: 80%;
+		animation-delay: 1.05s;
+	}
+
+	@keyframes celebration-pop {
+		from {
+			transform: scale(0.82) rotate(-2deg);
+			opacity: 0;
+		}
+		to {
+			transform: scale(1) rotate(0);
+			opacity: 1;
+		}
+	}
+
+	@keyframes celebration-rise {
+		0% {
+			transform: translate3d(-50%, 0, 0) scale(0.78) rotate(0);
+			opacity: 0;
+		}
+		12%,
+		78% {
+			opacity: 1;
+		}
+		100% {
+			transform: translate3d(calc(-50% + var(--drift)), -72vh, 0) scale(1.08) rotate(var(--spin));
+			opacity: 0;
+		}
+	}
+
 	.items-scroll {
 		flex: 1;
 		min-height: 0;
@@ -1130,6 +1311,28 @@ const fixtureImageUrl = import.meta.env.DEV ? trees.src : undefined;
 		.writing-light,
 		:global(.card) {
 			transition: none;
+		}
+
+		.celebration {
+			background: rgb(5 5 5 / 58%);
+		}
+
+		.celebration-image,
+		.celebration-words span {
+			display: none;
+		}
+
+		.celebration-words {
+			display: grid;
+			place-items: center;
+		}
+
+		.celebration-words span:first-child {
+			position: static;
+			display: block;
+			transform: none;
+			opacity: 1;
+			animation: none;
 		}
 	}
 </style>
