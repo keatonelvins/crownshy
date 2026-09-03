@@ -9,6 +9,9 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
+    "check": "astro check && tsc -p worker/tsconfig.json",
+    "dev:board": "astro build && wrangler dev",
+    "types": "wrangler types --include-runtime false",
     "preview": "astro preview",
     "astro": "astro"
   },
@@ -22,6 +25,10 @@
     ]
   },
   "devDependencies": {
-    "wrangler": "^4.127.0"
+    "@astrojs/check": "^0.9.10",
+    "@cloudflare/workers-types": "5.20260903.1",
+    "@types/node": "^26.4.1",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.128.0"
   }
 }

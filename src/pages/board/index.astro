@@ -1,0 +1,1135 @@
+---
+import trees from '../../assets/trees.jpg';
+
+const title = 'Board';
+const fixtureImageUrl = import.meta.env.DEV ? trees.src : undefined;
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="generator" content={Astro.generator} />
+		<meta name="robots" content="noindex, nofollow" />
+		<meta name="theme-color" content="#111111" />
+		<title>{title}</title>
+	</head>
+	<body data-fixture-image={fixtureImageUrl}>
+		<main class="stage">
+			<section class="board" aria-label="Shared bulletin board">
+				<section class="writing-panel" aria-label="Daily writing">
+					<header class="writing-header">
+						<p>50 WORDS!!!</p>
+						<div class="writing-lights" id="writing-lights" aria-label="Today’s submissions">
+							<span class="writing-light" id="writing-light-1" role="img" aria-label="Submission one pending"></span>
+							<span class="writing-light" id="writing-light-2" role="img" aria-label="Submission two pending"></span>
+						</div>
+					</header>
+
+					<form id="writing-form">
+						<label class="visually-hidden" for="writing-content">Paste today’s writing</label>
+						<textarea
+							id="writing-content"
+							name="content"
+							maxlength="20000"
+							placeholder="write something, anything..."
+							disabled
+							required></textarea>
+						<div class="writing-footer">
+							<p class="writing-message" id="writing-message" role="status"></p>
+							<div class="writing-submit">
+								<span id="writing-count">0 / 50</span>
+								<button type="submit" disabled>submit</button>
+							</div>
+						</div>
+					</form>
+				</section>
+
+				<div class="items-scroll">
+					<div class="items" id="items" aria-live="polite" aria-busy="true"></div>
+				</div>
+
+				<p class="status" id="status" role="status"></p>
+
+				<div class="add-controls" id="add-controls">
+					<div class="add-menu" id="add-menu" hidden>
+						<button type="button" id="add-card">card</button>
+						<button type="button" id="add-image">image</button>
+					</div>
+					<button
+						class="add-button"
+						id="add-button"
+						type="button"
+						aria-label="Add to the board"
+						aria-controls="add-menu"
+						aria-expanded="false"
+						disabled
+					>
+						<span aria-hidden="true">+</span>
+					</button>
+				</div>
+			</section>
+		</main>
+
+		<dialog class="dialog login-dialog" id="login-dialog">
+			<form id="login-form">
+				<label for="passphrase">passphrase</label>
+				<input id="passphrase" name="passphrase" type="password" autocomplete="current-password" required />
+				<p class="form-error" id="login-error" role="alert"></p>
+				<button type="submit">enter</button>
+			</form>
+		</dialog>
+
+		<dialog class="dialog card-dialog" id="card-dialog">
+			<form id="card-form">
+				<label for="card-content">new card</label>
+				<textarea id="card-content" name="content" maxlength="500" required></textarea>
+				<p class="form-error" id="card-error" role="alert"></p>
+				<div class="dialog-actions">
+					<button class="quiet-button" id="cancel-card" type="button">cancel</button>
+					<button type="submit">add</button>
+				</div>
+			</form>
+		</dialog>
+
+		<input id="image-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden />
+
+		<script>
+			type BoardItem = {
+				id: string;
+				kind: 'card' | 'image';
+				content: string | null;
+				imageUrl: string | null;
+			};
+
+			type ItemsResponse = { items: BoardItem[] };
+			type WritingStatus = {
+				date: string;
+				timeZone: string;
+				minWords: number;
+				completed: number;
+				lights: [boolean, boolean];
+			};
+			const MAX_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024;
+			const MAX_BOARD_IMAGE_BYTES = 1_400_000;
+			const fixtureMode = import.meta.env.DEV && new URLSearchParams(window.location.search).get('fixture') === '1';
+
+			const itemsElement = getElement<HTMLDivElement>('items');
+			const writingForm = getElement<HTMLFormElement>('writing-form');
+			const writingContent = getElement<HTMLTextAreaElement>('writing-content');
+			const writingMessage = getElement<HTMLParagraphElement>('writing-message');
+			const writingCount = getElement<HTMLSpanElement>('writing-count');
+			const writingSubmitButton = getElement<HTMLButtonElement>('writing-form').querySelector<HTMLButtonElement>(
+				'button[type="submit"]',
+			);
+			const writingLights = [
+				getElement<HTMLSpanElement>('writing-light-1'),
+				getElement<HTMLSpanElement>('writing-light-2'),
+			] as const;
+			const statusElement = getElement<HTMLParagraphElement>('status');
+			const addControls = getElement<HTMLDivElement>('add-controls');
+			const addButton = getElement<HTMLButtonElement>('add-button');
+			const addMenu = getElement<HTMLDivElement>('add-menu');
+			const addCardButton = getElement<HTMLButtonElement>('add-card');
+			const addImageButton = getElement<HTMLButtonElement>('add-image');
+			const loginDialog = getElement<HTMLDialogElement>('login-dialog');
+			const loginForm = getElement<HTMLFormElement>('login-form');
+			const loginError = getElement<HTMLParagraphElement>('login-error');
+			const passphraseInput = getElement<HTMLInputElement>('passphrase');
+			const cardDialog = getElement<HTMLDialogElement>('card-dialog');
+			const cardForm = getElement<HTMLFormElement>('card-form');
+			const cardContent = getElement<HTMLTextAreaElement>('card-content');
+			const cardError = getElement<HTMLParagraphElement>('card-error');
+			const cancelCardButton = getElement<HTMLButtonElement>('cancel-card');
+			const imageInput = getElement<HTMLInputElement>('image-input');
+
+			let authenticated = false;
+			let refreshing = false;
+			let boardItems: BoardItem[] = [];
+			let writingStatus: WritingStatus = {
+				date: '',
+				timeZone: 'America/Los_Angeles',
+				minWords: 50,
+				completed: 0,
+				lights: [false, false],
+			};
+			let submittingWriting = false;
+			const hiddenItemIds = new Set<string>();
+
+			function getElement<T extends HTMLElement>(id: string): T {
+				const element = document.getElementById(id);
+				if (!element) throw new Error(`Missing #${id}`);
+				return element as T;
+			}
+
+			function setStatus(message: string, isError = false) {
+				statusElement.textContent = message;
+				statusElement.classList.toggle('is-error', isError);
+			}
+
+			function setUnlocked(unlocked: boolean) {
+				authenticated = unlocked;
+				addButton.disabled = !unlocked;
+				writingContent.disabled = !unlocked || writingStatus.completed >= 2;
+				itemsElement.classList.toggle('is-locked', !unlocked);
+				updateWritingSubmitState();
+			}
+
+			function countWords(value: string): number {
+				const normalized = value.trim();
+				return normalized ? normalized.split(/\s+/u).length : 0;
+			}
+
+			function updateWritingSubmitState() {
+				const words = countWords(writingContent.value);
+				writingCount.textContent = `${words} / ${writingStatus.minWords}`;
+				if (writingSubmitButton) {
+					writingSubmitButton.disabled =
+						!authenticated || submittingWriting || writingStatus.completed >= 2 || words < writingStatus.minWords;
+				}
+			}
+
+			function renderWritingStatus(status: WritingStatus) {
+				writingStatus = status;
+				for (const [index, light] of writingLights.entries()) {
+					const complete = status.lights[index] ?? false;
+					light.classList.toggle('is-complete', complete);
+					light.setAttribute('aria-label', `Submission ${index + 1} ${complete ? 'complete' : 'pending'}`);
+				}
+				writingContent.disabled = !authenticated || status.completed >= 2;
+				writingMessage.textContent = status.completed >= 2 ? 'both in' : '';
+				updateWritingSubmitState();
+			}
+
+			function showLogin() {
+				setUnlocked(false);
+				closeAddMenu();
+				if (!loginDialog.open) loginDialog.showModal();
+				window.setTimeout(() => passphraseInput.focus(), 0);
+			}
+
+			function closeAddMenu(restoreFocus = false) {
+				addMenu.hidden = true;
+				addButton.setAttribute('aria-expanded', 'false');
+				if (restoreFocus) addButton.focus();
+			}
+
+			function toggleAddMenu() {
+				const opening = addMenu.hidden;
+				addMenu.hidden = !opening;
+				addButton.setAttribute('aria-expanded', String(opening));
+				if (opening) addCardButton.focus();
+			}
+
+			async function api(path: string, init?: RequestInit): Promise<Response> {
+				const response = await fetch(path, { ...init, credentials: 'same-origin' });
+				if (response.status === 401 && path !== '/api/session') showLogin();
+				return response;
+			}
+
+			async function getError(response: Response): Promise<string> {
+				try {
+					const body: unknown = await response.json();
+					if (typeof body === 'object' && body !== null && 'error' in body) {
+						const error = Reflect.get(body, 'error');
+						if (typeof error === 'string') return error;
+					}
+				} catch {
+					// Fall through to the generic message.
+				}
+				return 'Something went wrong.';
+			}
+
+			async function prepareImage(file: File): Promise<Blob> {
+				if (file.size > MAX_SOURCE_IMAGE_BYTES) {
+					throw new Error('Choose an image smaller than 20 MB.');
+				}
+
+				if (file.size <= MAX_BOARD_IMAGE_BYTES) return file;
+				if (file.type === 'image/gif') {
+					throw new Error('GIFs need to be smaller than 1.4 MB.');
+				}
+
+				const objectUrl = URL.createObjectURL(file);
+				try {
+					const source = new Image();
+					source.src = objectUrl;
+					await source.decode();
+
+					let maxDimension = 1600;
+					for (let sizeAttempt = 0; sizeAttempt < 4; sizeAttempt += 1) {
+						const scale = Math.min(1, maxDimension / Math.max(source.naturalWidth, source.naturalHeight));
+						const canvas = document.createElement('canvas');
+						canvas.width = Math.max(1, Math.round(source.naturalWidth * scale));
+						canvas.height = Math.max(1, Math.round(source.naturalHeight * scale));
+						const context = canvas.getContext('2d');
+						if (!context) throw new Error('This browser could not prepare the image.');
+						context.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+						for (const quality of [0.86, 0.72, 0.58, 0.44]) {
+							const blob = await canvasToBlob(canvas, quality);
+							if (blob.size <= MAX_BOARD_IMAGE_BYTES) return blob;
+						}
+
+						maxDimension = Math.round(maxDimension * 0.75);
+					}
+				} finally {
+					URL.revokeObjectURL(objectUrl);
+				}
+
+				throw new Error('That image could not be made small enough.');
+			}
+
+			function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+				return new Promise((resolve, reject) => {
+					canvas.toBlob(
+						(blob) => (blob ? resolve(blob) : reject(new Error('This browser could not prepare the image.'))),
+						'image/webp',
+						quality,
+					);
+				});
+			}
+
+			function renderItems(items: BoardItem[]) {
+				boardItems = items.filter((item) => !hiddenItemIds.has(item.id));
+				const fragment = document.createDocumentFragment();
+
+				for (const item of boardItems) {
+					const card = document.createElement(item.kind === 'image' ? 'figure' : 'article');
+					card.className = item.kind === 'image' ? 'card image-card' : 'card text-card';
+					card.dataset.id = item.id;
+
+					if (item.kind === 'card') {
+						const content = document.createElement('p');
+						content.textContent = item.content ?? '';
+						card.append(content);
+					} else if (item.imageUrl) {
+						const image = document.createElement('img');
+						image.src = item.imageUrl;
+						image.alt = '';
+						image.loading = 'lazy';
+						image.decoding = 'async';
+						card.append(image);
+					}
+
+					if (!fixtureMode) {
+						const deleteButton = document.createElement('button');
+						deleteButton.className = 'delete-button';
+						deleteButton.type = 'button';
+						deleteButton.textContent = '×';
+						deleteButton.setAttribute('aria-label', `Delete ${item.kind}`);
+						deleteButton.addEventListener('click', () => deleteItem(item.id, card));
+						card.append(deleteButton);
+					}
+
+					fragment.append(card);
+				}
+
+				itemsElement.replaceChildren(fragment);
+				itemsElement.setAttribute('aria-busy', 'false');
+			}
+
+			function fixtureSvg(width: number, height: number, label: string, foreground: string): string {
+				const svg = `
+					<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+						<rect width="100%" height="100%" fill="#e9e7df"/>
+						<circle cx="${Math.round(width * 0.72)}" cy="${Math.round(height * 0.3)}" r="${Math.round(Math.min(width, height) * 0.2)}" fill="${foreground}"/>
+						<path d="M0 ${Math.round(height * 0.82)} L${Math.round(width * 0.42)} ${Math.round(height * 0.47)} L${width} ${Math.round(height * 0.88)} V${height} H0 Z" fill="#b8b4a8"/>
+						<text x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.12)}" fill="#111" font-family="Arial, sans-serif" font-size="${Math.max(12, Math.round(width * 0.055))}" letter-spacing="1">${label}</text>
+					</svg>`;
+				return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+			}
+
+			function getFixtureItems(): BoardItem[] {
+				const treesImage = document.body.dataset.fixtureImage ?? fixtureSvg(720, 920, 'FIELD NOTE', '#353535');
+				return [
+					{ id: 'fixture-1', kind: 'card', content: 'buy stamps', imageUrl: null },
+					{ id: 'fixture-2', kind: 'image', content: null, imageUrl: treesImage },
+					{
+						id: 'fixture-3',
+						kind: 'card',
+						content:
+							'Today’s fifty words begin with the sound of rain against the kitchen window. We leave two cups beside the sink, one chipped, one still warm. Outside, someone carries flowers through the crosswalk. Nothing happens, exactly, but the morning keeps opening its small doors, asking us to notice and enter again.',
+						imageUrl: null,
+					},
+					{ id: 'fixture-4', kind: 'image', content: null, imageUrl: fixtureSvg(960, 560, 'AFTERNOON', '#c65b3c') },
+					{
+						id: 'fixture-5',
+						kind: 'card',
+						content: 'Possible title:\nThe Shape of a Small Weather',
+						imageUrl: null,
+					},
+					{ id: 'fixture-6', kind: 'image', content: null, imageUrl: fixtureSvg(620, 860, 'WALK HOME', '#53675a') },
+					{
+						id: 'fixture-7',
+						kind: 'card',
+						content:
+							'Longer notes should simply make a taller card. This one keeps going to test the edge of the layout: an overheard sentence, the yellow receipt folded into a coat pocket, three lines copied from a dream before breakfast, and the name of a street we might use later. The board should make room without leaving a blank row beside it.',
+						imageUrl: null,
+					},
+					{ id: 'fixture-8', kind: 'image', content: null, imageUrl: fixtureSvg(700, 700, 'STUDY', '#3f506b') },
+					{ id: 'fixture-9', kind: 'card', content: 'remember the red umbrella', imageUrl: null },
+				];
+			}
+
+			async function refreshItems(silent = false) {
+				if (!authenticated || refreshing) return;
+				refreshing = true;
+				if (!silent) setStatus('loading…');
+
+				try {
+					const response = await api('/api/items');
+					if (!response.ok) {
+						if (response.status !== 401) setStatus(await getError(response), true);
+						return;
+					}
+					const data = (await response.json()) as ItemsResponse;
+					renderItems(data.items);
+					setStatus('');
+				} catch {
+					setStatus('Could not reach the board.', true);
+				} finally {
+					refreshing = false;
+				}
+			}
+
+			async function refreshWritingStatus() {
+				if (!authenticated || fixtureMode) return;
+				try {
+					const response = await api('/api/writing/today');
+					if (!response.ok) {
+						if (response.status !== 401) writingMessage.textContent = await getError(response);
+						return;
+					}
+					renderWritingStatus((await response.json()) as WritingStatus);
+				} catch {
+					writingMessage.textContent = 'Could not load today’s writing.';
+				}
+			}
+
+			async function deleteItem(id: string, element: HTMLElement) {
+				element.classList.add('is-removing');
+				hiddenItemIds.add(id);
+				renderItems(boardItems.filter((item) => item.id !== id));
+				try {
+					const response = await api(`/api/items/${id}`, { method: 'DELETE' });
+					if (!response.ok) {
+						hiddenItemIds.delete(id);
+						void refreshItems(true);
+						if (response.status !== 401) setStatus(await getError(response), true);
+						return;
+					}
+					setStatus('');
+				} catch {
+					hiddenItemIds.delete(id);
+					void refreshItems(true);
+					setStatus('Could not delete that.', true);
+				}
+			}
+
+			addButton.addEventListener('click', toggleAddMenu);
+			addCardButton.addEventListener('click', () => {
+				closeAddMenu();
+				cardError.textContent = '';
+				cardDialog.showModal();
+				cardContent.focus();
+			});
+			addImageButton.addEventListener('click', () => {
+				closeAddMenu();
+				imageInput.click();
+			});
+
+			writingContent.addEventListener('input', updateWritingSubmitState);
+			writingForm.addEventListener('submit', async (event) => {
+				event.preventDefault();
+				if (countWords(writingContent.value) < writingStatus.minWords || writingStatus.completed >= 2) return;
+
+				submittingWriting = true;
+				writingMessage.textContent = '';
+				updateWritingSubmitState();
+
+				if (fixtureMode) {
+					const nextCompleted = Math.min(2, writingStatus.completed + 1);
+					writingForm.reset();
+					renderWritingStatus({
+						...writingStatus,
+						completed: nextCompleted,
+						lights: [nextCompleted >= 1, nextCompleted >= 2],
+					});
+					submittingWriting = false;
+					updateWritingSubmitState();
+					return;
+				}
+
+				try {
+					const response = await api('/api/writing/submissions', {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({ content: writingContent.value }),
+					});
+					if (!response.ok) {
+						if (response.status !== 401) writingMessage.textContent = await getError(response);
+						return;
+					}
+
+					writingForm.reset();
+					renderWritingStatus((await response.json()) as WritingStatus);
+				} catch {
+					writingMessage.textContent = 'Could not save that writing.';
+				} finally {
+					submittingWriting = false;
+					updateWritingSubmitState();
+				}
+			});
+
+			document.addEventListener('click', (event) => {
+				if (event.target instanceof Node && !addControls.contains(event.target)) closeAddMenu();
+			});
+
+			document.addEventListener('keydown', (event) => {
+				if (event.key === 'Escape' && !addMenu.hidden) closeAddMenu(true);
+			});
+
+			loginDialog.addEventListener('cancel', (event) => event.preventDefault());
+			loginForm.addEventListener('submit', async (event) => {
+				event.preventDefault();
+				loginError.textContent = '';
+				const submitButton = loginForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+				if (submitButton) submitButton.disabled = true;
+
+				try {
+					const response = await api('/api/session', {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({ passphrase: passphraseInput.value }),
+					});
+					if (!response.ok) {
+						loginError.textContent = await getError(response);
+						return;
+					}
+					passphraseInput.value = '';
+					loginDialog.close();
+					setUnlocked(true);
+					await Promise.all([refreshItems(), refreshWritingStatus()]);
+				} catch {
+					loginError.textContent = 'Could not reach the board.';
+				} finally {
+					if (submitButton) submitButton.disabled = false;
+				}
+			});
+
+			cancelCardButton.addEventListener('click', () => cardDialog.close());
+			cardForm.addEventListener('submit', async (event) => {
+				event.preventDefault();
+				cardError.textContent = '';
+				const submitButton = cardForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+				if (submitButton) submitButton.disabled = true;
+
+				try {
+					const response = await api('/api/cards', {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({ content: cardContent.value }),
+					});
+					if (!response.ok) {
+						if (response.status !== 401) cardError.textContent = await getError(response);
+						return;
+					}
+					cardForm.reset();
+					cardDialog.close();
+					await refreshItems(true);
+				} catch {
+					cardError.textContent = 'Could not add that card.';
+				} finally {
+					if (submitButton) submitButton.disabled = false;
+				}
+			});
+
+			imageInput.addEventListener('change', async () => {
+				const file = imageInput.files?.[0];
+				imageInput.value = '';
+				if (!file) return;
+
+				addButton.disabled = true;
+				setStatus('preparing image…');
+				try {
+					const image = await prepareImage(file);
+					setStatus('adding image…');
+					const response = await api('/api/images', {
+						method: 'POST',
+						headers: { 'content-type': image.type },
+						body: image,
+					});
+					if (!response.ok) {
+						if (response.status !== 401) setStatus(await getError(response), true);
+						return;
+					}
+					await refreshItems(true);
+					setStatus('');
+				} catch (error) {
+					setStatus(error instanceof Error ? error.message : 'Could not add that image.', true);
+				} finally {
+					addButton.disabled = !authenticated;
+				}
+			});
+
+			async function initialize() {
+				if (fixtureMode) {
+					document.title = 'Board — Layout Preview';
+					addControls.hidden = true;
+					setUnlocked(true);
+					renderWritingStatus(writingStatus);
+					renderItems(getFixtureItems());
+					setStatus('');
+					return;
+				}
+
+				try {
+					const response = await api('/api/session');
+					if (!response.ok) {
+						showLogin();
+						return;
+					}
+					setUnlocked(true);
+					await Promise.all([refreshItems(), refreshWritingStatus()]);
+				} catch {
+					showLogin();
+					loginError.textContent = 'Could not reach the board.';
+				}
+			}
+
+			document.addEventListener('visibilitychange', () => {
+				if (document.visibilityState === 'visible') {
+					void refreshItems(true);
+					void refreshWritingStatus();
+				}
+			});
+			window.addEventListener('focus', () => {
+				void refreshItems(true);
+				void refreshWritingStatus();
+			});
+			window.setInterval(() => {
+				void refreshItems(true);
+				void refreshWritingStatus();
+			}, 60_000);
+
+			void initialize();
+		</script>
+	</body>
+</html>
+
+<style>
+	:global(*) {
+		box-sizing: border-box;
+	}
+
+	:global(html) {
+		background: #050505;
+		color-scheme: dark;
+		font-family: Arial, Helvetica, sans-serif;
+	}
+
+	:global(body) {
+		margin: 0;
+		min-width: 20rem;
+		min-height: 100svh;
+		background: #050505;
+		color: #f4f4f2;
+	}
+
+	button,
+	input,
+	textarea {
+		font: inherit;
+	}
+
+	button {
+		border: 0;
+		cursor: pointer;
+	}
+
+	button:focus-visible,
+	input:focus-visible,
+	textarea:focus-visible {
+		outline: 2px solid #fff;
+		outline-offset: 3px;
+	}
+
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	.stage {
+		display: grid;
+		min-height: 100svh;
+		place-items: center;
+		padding: 1rem;
+	}
+
+	.board {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		width: min(64rem, calc(100vw - 2rem));
+		height: min(40rem, calc(100svh - 2rem));
+		min-height: 28rem;
+		overflow: hidden;
+		background: #101010;
+		border: 1px solid #292929;
+	}
+
+	.writing-panel {
+		flex: none;
+		padding: 1rem 1.25rem 0.8rem;
+		border-bottom: 1px solid #292929;
+	}
+
+	.writing-header,
+	.writing-footer,
+	.writing-submit,
+	.writing-lights {
+		display: flex;
+		align-items: center;
+	}
+
+	.writing-header {
+		justify-content: space-between;
+		margin-bottom: 0.65rem;
+	}
+
+	.writing-header p,
+	.writing-message {
+		margin: 0;
+	}
+
+	.writing-header p {
+		color: #a3a3a0;
+		font-size: 0.7rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+
+	.writing-lights {
+		gap: 0.45rem;
+	}
+
+	.writing-light {
+		display: grid;
+		width: 1.05rem;
+		height: 1.05rem;
+		place-items: center;
+		border-radius: 50%;
+		background: #b94b48;
+		color: #24100f;
+		font-family: Arial, Helvetica, sans-serif;
+		font-size: 0.76rem;
+		line-height: 1;
+		box-shadow: 0 0 0.5rem rgb(185 75 72 / 18%);
+		transition: background 160ms ease, box-shadow 160ms ease;
+	}
+
+	.writing-light::after {
+		content: '☹';
+		transform: translateY(-0.02em);
+	}
+
+	.writing-light.is-complete {
+		background: #5b9d6a;
+		color: #102616;
+		box-shadow: 0 0 0.55rem rgb(91 157 106 / 24%);
+	}
+
+	.writing-light.is-complete::after {
+		content: '☺';
+	}
+
+	#writing-form {
+		display: grid;
+		gap: 0.45rem;
+	}
+
+	#writing-content {
+		display: block;
+		width: 100%;
+		min-height: 4.6rem;
+		padding: 0.7rem 0.75rem;
+		resize: vertical;
+		border: 1px solid #303030;
+		border-radius: 0;
+		background: #171717;
+		color: #f4f4f2;
+		font-size: 0.88rem;
+		line-height: 1.4;
+	}
+
+	#writing-content::placeholder {
+		color: #686866;
+	}
+
+	#writing-content:disabled {
+		cursor: default;
+		opacity: 0.45;
+	}
+
+	.writing-footer {
+		min-height: 1.35rem;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.writing-message {
+		color: #858582;
+		font-size: 0.68rem;
+	}
+
+	.writing-submit {
+		flex: none;
+		gap: 0.8rem;
+		color: #777774;
+		font-size: 0.68rem;
+	}
+
+	.writing-submit button {
+		padding: 0;
+		background: transparent;
+		color: #f4f4f2;
+		font-size: 0.72rem;
+		text-transform: lowercase;
+	}
+
+	.writing-submit button:disabled {
+		cursor: default;
+		color: #555552;
+	}
+
+	.items-scroll {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		padding: 1.25rem 1.25rem 5.5rem;
+		scrollbar-color: #4a4a4a transparent;
+	}
+
+	.items {
+		column-count: 4;
+		column-gap: 1rem;
+	}
+
+	.items.is-locked {
+		opacity: 0.22;
+	}
+
+	:global(.card) {
+		position: relative;
+		display: inline-block;
+		width: 100%;
+		min-width: 0;
+		margin: 0 0 1rem;
+		break-inside: avoid;
+		background: #f5f5f2;
+		color: #111;
+		box-shadow: 0 1px 0 rgb(255 255 255 / 8%);
+		vertical-align: top;
+		transition: opacity 140ms ease, transform 140ms ease;
+	}
+
+	:global(.text-card) {
+		padding: 1.15rem;
+	}
+
+	:global(.text-card p) {
+		margin: 0;
+		font-size: clamp(0.9rem, 1.4vw, 1.05rem);
+		line-height: 1.42;
+		overflow-wrap: anywhere;
+		white-space: pre-wrap;
+	}
+
+	:global(.image-card) {
+		padding: 0;
+		background: transparent;
+		box-shadow: none;
+	}
+
+	:global(.image-card img) {
+		display: block;
+		width: 100%;
+		height: auto;
+	}
+
+	:global(.delete-button) {
+		position: absolute;
+		top: 0.25rem;
+		right: 0.25rem;
+		display: grid;
+		width: 2rem;
+		height: 2rem;
+		padding: 0;
+		place-items: center;
+		background: transparent;
+		color: #111;
+		font-size: 1.45rem;
+		font-weight: 300;
+		line-height: 1;
+		opacity: 0;
+		transition: opacity 120ms ease;
+	}
+
+	:global(.image-card .delete-button) {
+		color: #fff;
+		mix-blend-mode: difference;
+	}
+
+	:global(.card:hover .delete-button),
+	:global(.delete-button:focus-visible) {
+		opacity: 1;
+	}
+
+	:global(.card.is-removing) {
+		transform: scale(0.97);
+		opacity: 0.25;
+		pointer-events: none;
+	}
+
+	.add-controls {
+		position: absolute;
+		right: 1.25rem;
+		bottom: 1.25rem;
+	}
+
+	.add-button {
+		display: grid;
+		width: 2.75rem;
+		height: 2.75rem;
+		padding: 0;
+		place-items: center;
+		background: transparent;
+		color: #fff;
+	}
+
+	.add-button span {
+		font-size: 2.5rem;
+		font-weight: 300;
+		line-height: 1;
+		transform: translateY(-0.06em);
+	}
+
+	.add-button:hover {
+		opacity: 0.65;
+	}
+
+	.add-button:disabled {
+		cursor: default;
+		opacity: 0.3;
+	}
+
+	.add-menu {
+		position: absolute;
+		right: 0;
+		bottom: 3.5rem;
+		width: 7.5rem;
+		padding: 0.35rem;
+		background: #fff;
+		box-shadow: 0 0.25rem 1.25rem rgb(0 0 0 / 35%);
+	}
+
+	.add-menu[hidden] {
+		display: none;
+	}
+
+	.add-menu button {
+		display: block;
+		width: 100%;
+		padding: 0.65rem 0.75rem;
+		background: transparent;
+		color: #111;
+		font-size: 0.8rem;
+		text-align: left;
+	}
+
+	.add-menu button:hover,
+	.add-menu button:focus-visible {
+		background: #e9e9e6;
+		outline: 0;
+	}
+
+	.status {
+		position: absolute;
+		bottom: 1.55rem;
+		left: 1.5rem;
+		max-width: calc(100% - 7rem);
+		margin: 0;
+		color: #8c8c8c;
+		font-size: 0.72rem;
+	}
+
+	.status.is-error {
+		color: #f0a2a2;
+	}
+
+	.dialog {
+		width: min(24rem, calc(100vw - 2rem));
+		padding: 1.25rem;
+		border: 0;
+		background: #f5f5f2;
+		color: #111;
+		box-shadow: 0 1rem 4rem rgb(0 0 0 / 55%);
+	}
+
+	.dialog::backdrop {
+		background: rgb(0 0 0 / 72%);
+	}
+
+	.dialog form {
+		display: grid;
+		gap: 0.85rem;
+	}
+
+	.dialog label {
+		font-size: 0.75rem;
+		letter-spacing: 0.04em;
+		text-transform: lowercase;
+	}
+
+	.dialog input,
+	.dialog textarea {
+		width: 100%;
+		border: 1px solid #c7c7c2;
+		border-radius: 0;
+		background: #fff;
+		color: #111;
+	}
+
+	.dialog input {
+		height: 2.75rem;
+		padding: 0 0.7rem;
+	}
+
+	.dialog textarea {
+		min-height: 10rem;
+		padding: 0.8rem;
+		line-height: 1.4;
+		resize: vertical;
+	}
+
+	.dialog button {
+		min-height: 2.6rem;
+		padding: 0.6rem 1rem;
+		background: #111;
+		color: #fff;
+		font-size: 0.8rem;
+	}
+
+	.dialog button:disabled {
+		cursor: wait;
+		opacity: 0.5;
+	}
+
+	.dialog .quiet-button {
+		background: transparent;
+		color: #555;
+	}
+
+	.dialog-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.35rem;
+	}
+
+	.form-error {
+		min-height: 1em;
+		margin: 0;
+		color: #8b2020;
+		font-size: 0.75rem;
+	}
+
+	@media (max-width: 48rem) {
+		.items {
+			column-count: 3;
+		}
+	}
+
+	@media (max-width: 30rem) {
+		.stage {
+			padding: 0;
+		}
+
+		.board {
+			width: 100vw;
+			height: 100svh;
+			min-height: 30rem;
+			border: 0;
+		}
+
+		.writing-panel {
+			padding: 0.75rem 0.75rem 0.65rem;
+		}
+
+		#writing-content {
+			min-height: 5rem;
+			font-size: 0.8rem;
+		}
+
+		.items-scroll {
+			padding: 0.75rem 0.75rem 5.25rem;
+		}
+
+		.items {
+			column-count: 2;
+			column-gap: 0.75rem;
+		}
+
+		:global(.card) {
+			margin-bottom: 0.75rem;
+		}
+
+		:global(.text-card) {
+			padding: 0.9rem;
+		}
+
+		:global(.text-card p) {
+			font-size: clamp(0.78rem, 3.6vw, 0.95rem);
+			line-height: 1.38;
+		}
+
+		:global(.delete-button) {
+			top: 0;
+			right: 0;
+			width: 2.75rem;
+			height: 2.75rem;
+			padding: 0.08rem 0.16rem 0 0;
+			place-items: start end;
+			border: 0;
+			background: transparent;
+			appearance: none;
+			font-size: 1.6rem;
+			opacity: 1;
+		}
+	}
+
+	@media (hover: none) {
+		:global(.delete-button) {
+			opacity: 1;
+		}
+
+		:global(.text-card) {
+			padding-right: 2rem;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.writing-light,
+		:global(.card) {
+			transition: none;
+		}
+	}
+</style>
