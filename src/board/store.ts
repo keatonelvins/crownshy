@@ -34,6 +34,25 @@ const KEY = 'board:v1';
 export const byOrd = (a: { ord: string; id: string }, b: { ord: string; id: string }) =>
   a.ord < b.ord ? -1 : a.ord > b.ord ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 
+/** Positions of a longest strictly increasing run in `keys` (not necessarily adjacent). */
+function increasing(keys: string[]): Set<number> {
+  const len = keys.map(() => 1);
+  const back = keys.map(() => -1);
+  let best = -1;
+  keys.forEach((key, i) => {
+    for (let j = 0; j < i; j++) {
+      if (keys[j] < key && len[j] + 1 > len[i]) {
+        len[i] = len[j] + 1;
+        back[i] = j;
+      }
+    }
+    if (best < 0 || len[i] > len[best]) best = i;
+  });
+  const keep = new Set<number>();
+  for (let i = best; i >= 0; i = back[i]) keep.add(i);
+  return keep;
+}
+
 /** An order key between a and b; null means "the start" / "the end". */
 export function between(a: string | null, b: string | null): string {
   if (a !== null && a === b) return generateKeyBetween(a, null);
@@ -184,8 +203,29 @@ export class Store {
     this.local({ k: 'o', id, del: 1 });
   }
 
-  moveObj(id: string, ord: string) {
-    this.local({ k: 'o', id, ord });
+  /** Puts the board in this order, moving as few cards as possible. */
+  arrange(ids: string[]) {
+    const objs = ids.flatMap((id) => this.live(id) ?? []);
+    const ords = objs.map((o) => o.ord);
+    // the longest run of cards already in order stays put; the rest get new keys
+    const keep = increasing(ords);
+    let prev: string | null = null;
+    objs.forEach((o, k) => {
+      if (keep.has(k)) {
+        prev = o.ord;
+        return;
+      }
+      let next: string | null = null;
+      for (let j = k + 1; j < objs.length; j++) {
+        if (keep.has(j)) {
+          next = ords[j];
+          break;
+        }
+      }
+      const ord = between(prev, next);
+      this.local({ k: 'o', id: o.id, ord });
+      prev = ord;
+    });
   }
 
   // ---------- talking to the server ----------

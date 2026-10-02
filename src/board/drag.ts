@@ -1,15 +1,16 @@
 import type { Grid } from './grid.ts';
-import { between, type Store } from './store.ts';
+import type { Store } from './store.ts';
 
 const HOLD_MS = 320; // touch: press and hold to pick a card up
 const MOUSE_SLOP = 6; // mouse: this much movement turns a press into a drag
 const TOUCH_SLOP = 8; // touch: moving this much before the hold means it's a scroll
-const RETARGET = 12; // the pointer must travel this far between reshuffles
+const SWAP_AT = 0.5; // cover this much of a card (the smaller of the two) to take its place
 const EDGE = 64; // auto-scroll zone at the top and bottom of the screen
 const BIN_REACH = 28; // extra room around the corner button when dropping onto it
 const EASE = 'cubic-bezier(.2, .8, .2, 1)';
 
 type Press = { id: string; card: HTMLElement; pointer: number; touch: boolean; x: number; y: number; timer: number };
+type Box = { left: number; top: number; right: number; bottom: number };
 type Dragging = {
   id: string;
   card: HTMLElement;
@@ -19,21 +20,33 @@ type Dragging = {
   // where on the card it was grabbed
   grabX: number;
   grabY: number;
-  // where the copy sits before any movement
+  // where the copy sits before any movement, and its size
   left: number;
   top: number;
+  w: number;
+  h: number;
   x: number;
   y: number;
-  // pointer position at the last reshuffle
-  anchorX: number;
-  anchorY: number;
+  // cards it's already over; only moving onto a new one causes a swap
+  over: Set<string>;
   away: boolean;
 };
 
+/** How much two boxes share, as a share of the smaller one (0 to 1). */
+function cover(a: Box, b: Box): number {
+  const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+  const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  if (w <= 0 || h <= 0) return 0;
+  const area = (r: Box) => (r.right - r.left) * (r.bottom - r.top);
+  return (w * h) / Math.min(area(a), area(b));
+}
+
 /**
  * Rearranging the board: drag a card (press and hold first on a phone, so a
- * normal swipe still scrolls). The other cards make room as it moves. Dropping
- * it on the corner button (a + that turns into a × while dragging) deletes it.
+ * normal swipe still scrolls). Once it covers half of another card, the two
+ * trade places; carried into empty space at the bottom of a column, it goes to
+ * the end. Dropping it on the corner button (a + that turns into a × while
+ * dragging) deletes it.
  */
 export class Drag {
   private grid: Grid;
@@ -156,13 +169,14 @@ export class Drag {
       grabY: p.y - rect.top,
       left: rect.left,
       top: rect.top,
+      w: rect.width,
+      h: rect.height,
       x: p.x,
       y: p.y,
-      anchorX: p.x,
-      anchorY: p.y,
+      over: new Set(),
       away: false,
     };
-    this.grid.drag = { id: p.id, index: this.grid.order().findIndex((o) => o.id === p.id) };
+    this.grid.drag = { id: p.id, order: this.grid.order().map((o) => o.id) };
     document.documentElement.classList.add('dragging');
     navigator.vibrate?.(8);
     this.place();
@@ -185,20 +199,60 @@ export class Drag {
       g.ghost.classList.toggle('away', away);
       this.bin.classList.toggle('hot', away);
     }
-    if (away || Math.hypot(g.x - g.anchorX, g.y - g.anchorY) < RETARGET) return;
+    if (away) return;
 
-    const over = document.elementFromPoint(g.x, g.y)?.closest<HTMLElement>('.card');
-    if (!over?.dataset.id || over === g.card) return;
-    const others = this.grid.order().filter((o) => o.id !== g.id);
-    const k = others.findIndex((o) => o.id === over.dataset.id);
-    if (k < 0) return;
-    const r = over.getBoundingClientRect();
-    const index = g.y < r.top + r.height / 2 ? k : k + 1;
-    if (index === this.grid.drag?.index) return;
-    this.grid.drag = { id: g.id, index };
-    g.anchorX = g.x;
-    g.anchorY = g.y;
+    // Judged against where cards are settling, not where they are mid-glide.
+    const order = this.grid.order();
+    const covered = this.covered(g);
+    // Cards it has moved off can count again; cards it's still over can't.
+    for (const id of g.over) if (!covered.has(id)) g.over.delete(id);
+
+    let target = -1;
+    let best = 0;
+    order.forEach((o, k) => {
+      const c = covered.get(o.id);
+      if (c !== undefined && !g.over.has(o.id) && c > best) {
+        best = c;
+        target = k;
+      }
+    });
+
+    const ids = order.map((o) => o.id);
+    const from = ids.indexOf(g.id);
+    if (target >= 0) {
+      // the two trade places
+      [ids[from], ids[target]] = [ids[target], ids[from]];
+    } else {
+      // carried below everything in a column (or into an empty one): to the end
+      const box = this.box(g);
+      const end = this.grid.columnEnd((box.left + box.right) / 2);
+      if (end === null || (box.top + box.bottom) / 2 <= end || from === ids.length - 1) return;
+      ids.push(...ids.splice(from, 1));
+    }
+    this.grid.drag = { id: g.id, order: ids };
     this.grid.layout(true);
+    // Whatever is under it now (moved there or not) has to be left before it counts.
+    g.over = new Set(this.covered(g).keys());
+  }
+
+  /** Where the floating copy is, at the card's own size. */
+  private box(g: Dragging): Box {
+    const left = g.x - g.grabX;
+    const top = g.y - g.grabY;
+    return { left, top, right: left + g.w, bottom: top + g.h };
+  }
+
+  /** The other cards it covers enough of to take their place, and by how much. */
+  private covered(g: Dragging): Map<string, number> {
+    const box = this.box(g);
+    const out = new Map<string, number>();
+    for (const o of this.grid.order()) {
+      if (o.id === g.id) continue;
+      const slot = this.grid.slot(o.id);
+      const c = slot ? cover(box, slot) : 0;
+      if (c >= SWAP_AT) out.set(o.id, c);
+    }
+    return out;
   }
 
   private autoscroll() {
@@ -225,7 +279,7 @@ export class Drag {
     this.drag = null;
     cancelAnimationFrame(this.scrolling);
     this.scrolling = 0;
-    const index = this.grid.drag?.index ?? 0;
+    const arranged = this.grid.order().map((o) => o.id);
     this.grid.drag = null;
     document.documentElement.classList.remove('dragging');
     this.bin.classList.remove('hot');
@@ -251,13 +305,7 @@ export class Drag {
       this.store.removeObj(g.id);
       return;
     }
-    if (commit) {
-      const order = this.store.ordered();
-      const others = order.filter((o) => o.id !== g.id);
-      if (index !== order.findIndex((o) => o.id === g.id)) {
-        this.store.moveObj(g.id, between(others[index - 1]?.ord ?? null, others[index]?.ord ?? null));
-      }
-    }
+    if (commit) this.store.arrange(arranged);
     this.grid.layout(true);
     if (!card.isConnected) {
       // deleted on the other device mid-drag

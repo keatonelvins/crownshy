@@ -39,8 +39,8 @@ export class Grid {
   onLayout = () => {};
   /** The card currently lifted into the sheet, kept hidden here. */
   lifted: string | null = null;
-  /** A card being dragged, and the place in the order it would drop into. */
-  drag: { id: string; index: number } | null = null;
+  /** A card being dragged, and the order the board would have if it dropped now. */
+  drag: { id: string; order: string[] } | null = null;
 
   private root: HTMLElement;
   private store: Store;
@@ -73,15 +73,39 @@ export class Grid {
     return this.cards.get(id);
   }
 
+  /** Where a card sits in the layout, ignoring any glide in progress. */
+  slot(id: string): { left: number; top: number; right: number; bottom: number } | null {
+    const el = this.cards.get(id);
+    const col = el?.parentElement;
+    if (!el || !col) return null;
+    const c = col.getBoundingClientRect();
+    const left = c.left + el.offsetLeft;
+    const top = c.top + el.offsetTop;
+    return { left, top, right: left + el.offsetWidth, bottom: top + el.offsetHeight };
+  }
+
+  /** The bottom of the column under x (empty slots count); null between columns. */
+  columnEnd(x: number): number | null {
+    for (const col of this.cols) {
+      const c = col.getBoundingClientRect();
+      if (x < c.left || x > c.right) continue;
+      let end = c.top;
+      for (const el of col.children as HTMLCollectionOf<HTMLElement>) end = Math.max(end, c.top + el.offsetTop + el.offsetHeight);
+      return end;
+    }
+    return null;
+  }
+
   /** Board order as shown, including where a dragged card would land. */
   order() {
     const order = this.store.ordered();
     const drag = this.drag;
     if (!drag) return order;
-    const rest = order.filter((o) => o.id !== drag.id);
-    const dragged = this.store.live(drag.id);
-    if (dragged) rest.splice(Math.min(drag.index, rest.length), 0, dragged);
-    return rest;
+    const live = new Map(order.map((o) => [o.id, o]));
+    const shown = drag.order.flatMap((id) => live.get(id) ?? []);
+    // anything added on the other device mid-drag goes at the end for now
+    const seen = new Set(drag.order);
+    return [...shown, ...order.filter((o) => !seen.has(o.id))];
   }
 
   setLifted(id: string | null) {
