@@ -11,6 +11,7 @@
 		"not_found_handling": "single-page-application"
 	},
 	"routes": [
+		{ "pattern": "crownshypress.com", "custom_domain": true },
 		{ "pattern": "www.crownshypress.com", "custom_domain": true }
 	],
 	"observability": {
