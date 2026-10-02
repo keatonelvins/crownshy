@@ -20,6 +20,20 @@
   -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
+
+  /* Behave like an app, not a web page: no double-tap zoom, no selecting or
+     long-pressing the board itself. Text being written stays selectable. */
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+textarea,
+input {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 *,
@@ -47,7 +61,8 @@ body::before {
     radial-gradient(110% 80% at 30% 35%, #151918 0%, #0c0e0e 55%, #050606 100%);
 }
 
-html.sheet-open {
+html.sheet-open,
+html.view-open {
   overflow: hidden;
 }
 
@@ -75,21 +90,15 @@ html.sheet-open {
 .card {
   background: #fff;
   color: #000;
-  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.25), 0 0 22px rgba(220, 235, 230, 0.07);
   cursor: pointer;
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-  touch-action: manipulation;
 }
 
-/* picked up: a floating copy above everything, lit a little harder, out of the way of hit-testing */
+/* picked up: a floating copy above everything, out of the way of hit-testing */
 .card.ghost {
   position: fixed;
   z-index: 20;
   margin: 0;
   pointer-events: none;
-  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.3), 0 18px 50px rgba(0, 0, 0, 0.65);
 }
 
 .card.ghost.away {
@@ -142,7 +151,38 @@ html.dragging * {
   overflow-wrap: anywhere;
 }
 
-/* ---------- the one control ---------- */
+/* A picture: its exact shape from the start, the blurred preview under it until it loads. */
+.image {
+  position: relative;
+  margin: 0;
+  overflow: hidden;
+}
+
+.image::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--ph, none) center / cover no-repeat;
+  filter: blur(12px);
+  transform: scale(1.15);
+}
+
+.image img {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.2s;
+  -webkit-user-drag: none;
+}
+
+.image img.in {
+  opacity: 1;
+}
+
+/* ---------- making things: + and its menu ---------- */
 
 #add {
   position: fixed;
@@ -156,9 +196,6 @@ html.dragging * {
   background: none;
   color: #fff;
   cursor: pointer;
-  touch-action: manipulation;
-  -webkit-user-select: none;
-  user-select: none;
 }
 
 #add svg {
@@ -171,9 +208,59 @@ html.dragging * {
   transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-#add:focus-visible {
+#add:focus-visible,
+#menu button:focus-visible {
   outline: 1px solid rgba(255, 255, 255, 0.6);
   outline-offset: -6px;
+}
+
+#menu {
+  position: fixed;
+  right: max(4px, env(safe-area-inset-right));
+  bottom: calc(max(4px, env(safe-area-inset-bottom)) + 52px);
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.14s, transform 0.14s, visibility 0s 0.14s;
+}
+
+html.menu-open #menu {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.14s, transform 0.14s;
+}
+
+#menu button {
+  width: 52px;
+  height: 52px;
+  padding: 14px;
+  border: 0;
+  background: none;
+  color: #fff;
+  cursor: pointer;
+}
+
+#menu svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+}
+
+#menu circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+/* open, the + becomes a × that closes the menu */
+html.menu-open #add svg {
+  transform: rotate(45deg);
 }
 
 /* While a card is being dragged, the + turns into a × to drop it on. */
@@ -187,6 +274,28 @@ html.dragging #add.hot svg {
 
 html.sheet-open #add {
   z-index: 5;
+}
+
+/* ---------- a picture lifted off the board ---------- */
+
+.view {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(0, 0, 0, 0.92);
+  touch-action: none;
+  cursor: zoom-out;
+}
+
+.view[hidden] {
+  display: none;
+}
+
+.view img {
+  position: absolute;
+  transform-origin: 0 0;
+  background: #fff center / cover no-repeat;
+  -webkit-user-drag: none;
 }
 
 /* ---------- a list lifted off the board ---------- */
@@ -218,7 +327,6 @@ html.sheet-open #add {
   overscroll-behavior: contain;
   background: #fff;
   color: #000;
-  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.25), 0 24px 80px rgba(0, 0, 0, 0.55);
   transform-origin: 0 0;
   font-size: 18px;
   line-height: 1.42;

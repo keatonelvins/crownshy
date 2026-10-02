@@ -1,14 +1,15 @@
-import { ID_RE } from '../shared/protocol.ts';
+import { ID_RE, LIMITS } from '../shared/protocol.ts';
 import { gate } from './gate.ts';
 
 export { Board } from './board.ts';
+export { Images } from './images.ts';
 
 const COOKIE = 'board';
 // Browsers cap cookie lifetimes at 400 days; it's renewed on every visit.
 const COOKIE_MAX_AGE = 400 * 24 * 60 * 60;
 
 export default {
-  fetch(request, env) {
+  fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (url.pathname === '/api/health') {
@@ -16,14 +17,14 @@ export default {
     }
 
     if (url.pathname === '/board' || url.pathname.startsWith('/board/')) {
-      return board(request, env, url);
+      return board(request, env, ctx, url);
     }
 
     return new Response(null, { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
 
-async function board(request: Request, env: Env, url: URL): Promise<Response> {
+async function board(request: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
   const path = url.pathname.replace(/\/+$/, '') || '/';
 
   if (path === '/board/login') {
@@ -41,9 +42,14 @@ async function board(request: Request, env: Env, url: URL): Promise<Response> {
     return boardStub(env).fetch(request);
   }
 
+  if (path.startsWith('/board/img/')) {
+    if (!authed) return new Response(null, { status: 401 });
+    return image(request, env, ctx, url, path);
+  }
+
   if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405 });
 
-  // /board, or /board/<list id> to open straight into a list
+  // /board, or /board/<id> to open straight into a list or image
   const id = path.slice('/board/'.length);
   if (path !== '/board' && !ID_RE.test(id)) return redirect('/board');
 
@@ -73,6 +79,45 @@ async function page(env: Env, url: URL): Promise<Response> {
     'Set-Cookie': cookie(await expectedToken(env), url),
   });
   return new Response(body, { status: 200, headers });
+}
+
+const IMAGE_PATH = /^\/board\/img\/([0-9A-Za-z]{8,32})\/(full|board)$/;
+const IMAGE_TYPES = ['image/webp', 'image/jpeg'];
+
+/** Stores and serves one copy of an image (the browser has already resized it). */
+async function image(request: Request, env: Env, ctx: ExecutionContext, url: URL, path: string): Promise<Response> {
+  const match = path.match(IMAGE_PATH);
+  if (!match) return new Response(null, { status: 404 });
+  const key = `${match[1]}/${match[2]}`;
+  const files = env.IMAGES.getByName('images');
+
+  if (request.method === 'PUT') {
+    const origin = request.headers.get('Origin');
+    if (origin && origin !== url.origin) return new Response(null, { status: 403 });
+    const type = request.headers.get('Content-Type') ?? '';
+    if (!IMAGE_TYPES.includes(type)) return new Response(null, { status: 415 });
+    const data = await request.arrayBuffer();
+    if (!data.byteLength || data.byteLength > LIMITS.imageBytes) return new Response(null, { status: 413 });
+    await files.put(key, type, data);
+    return new Response(null, { status: 204 });
+  }
+  if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405 });
+
+  // A stored copy never changes. The edge keeps it (and is only reachable past the
+  // password check above); the browser keeps it forever.
+  const cacheKey = new Request(new URL(path, url));
+  let res = await caches.default.match(cacheKey);
+  if (!res) {
+    const file = await files.get(key);
+    if (!file) return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+    res = new Response(file.data, {
+      headers: { 'Content-Type': file.type, 'Cache-Control': 'public, max-age=31536000, immutable', ETag: `"${key}"` },
+    });
+    ctx.waitUntil(caches.default.put(cacheKey, res.clone()));
+  }
+  const out = new Response(request.method === 'HEAD' ? null : res.body, res);
+  out.headers.set('Cache-Control', 'private, max-age=31536000, immutable');
+  return out;
 }
 
 async function login(request: Request, env: Env, url: URL): Promise<Response> {

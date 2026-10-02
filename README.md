@@ -26,6 +26,7 @@ This runs the app and the Worker together locally at http://localhost:5173.
 - **Password:** the Worker checks `BOARD_PASSWORD` and leaves a long-lived cookie. Locally it comes from `.dev.vars` (gitignored, one line: `BOARD_PASSWORD=...`). In production it's a secret: `npx wrangler secret put BOARD_PASSWORD`.
 - **Data:** one Durable Object (`worker/board.ts`) keeps the board in SQLite and holds a WebSocket to each open board. The Worker inlines the current board into the page, so it paints before the socket connects.
 - **Client:** `board.html` + `src/board/` (no framework; kept small for speed). Edits apply locally first, queue while offline, and sync when the socket is back. `public/board-sw.js` serves the last copy of the page instantly on repeat visits.
+- **Images:** the browser resizes each picture into a full copy (2048px) and a board copy (720px wide) plus a tiny blurred preview that rides along in the board data. Copies queue in IndexedDB until they're uploaded, then live in a second Durable Object (`worker/images.ts`). An image id is never reused, so copies are cached forever: at the edge, in the browser, and by the service worker.
 - **Wire format:** `shared/protocol.ts`, used by both sides.
 
 ## Deploy

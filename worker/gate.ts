@@ -6,7 +6,7 @@ export function gate(next: string, wrong: boolean): string {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#060707">
 <meta name="robots" content="noindex">
 <title>!!!</title>
@@ -22,6 +22,7 @@ html {
   color-scheme: dark;
   background: #060707;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 body {
   margin: 0;
@@ -44,7 +45,6 @@ input {
   caret-color: #000;
   font: 400 20px 'Areal', system-ui, sans-serif;
   letter-spacing: .08em;
-  box-shadow: 0 0 0 .5px rgba(255, 255, 255, .25), 0 0 22px rgba(220, 235, 230, .07);
 }
 .no input { animation: no .32s cubic-bezier(.36, .07, .19, .97); }
 @keyframes no {
@@ -59,6 +59,7 @@ input {
 <input type="password" name="p" aria-label="password" autocomplete="current-password" enterkeyhint="go" autofocus required>
 <input type="hidden" name="next" value="${escapeAttr(next)}">
 </form>
+<script>for (const t of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(t, (e) => e.preventDefault());</script>
 </body>
 </html>`;
 }

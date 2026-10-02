@@ -1,4 +1,6 @@
+import { BOARD_WIDTH, imageUrl } from '../../shared/protocol.ts';
 import type { Change, Obj, Store } from './store.ts';
+import type { Uploads } from './uploads.ts';
 
 const EASE = 'cubic-bezier(.2, .8, .2, 1)';
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -8,6 +10,7 @@ interface Metrics {
   pad: number;
   gap: number;
   n: number;
+  colW: number;
   fs: number;
 }
 
@@ -20,7 +23,7 @@ function metrics(): Metrics {
   const colW = (width - 2 * pad - gap * (n - 1)) / n;
   // Type grows with the column so cards keep their proportions on every screen.
   const fs = Math.min(15.5, Math.max(11.5, 7 + colW * 0.026));
-  return { width, pad, gap, n, fs };
+  return { width, pad, gap, n, colW, fs };
 }
 
 /**
@@ -45,10 +48,13 @@ export class Grid {
   private cards = new Map<string, HTMLElement>();
   private moves = new WeakMap<HTMLElement, Animation>();
   private width = 0;
+  private colW = 0;
+  private uploads: Uploads;
 
-  constructor(root: HTMLElement, store: Store) {
+  constructor(root: HTMLElement, store: Store, uploads: Uploads) {
     this.root = root;
     this.store = store;
+    this.uploads = uploads;
     store.subscribe((c) => this.update(c));
     root.addEventListener('click', (e) => {
       const card = (e.target as HTMLElement).closest<HTMLElement>('.card');
@@ -96,6 +102,11 @@ export class Grid {
     style.setProperty('--pad', `${m.pad}px`);
     style.setProperty('--gap', `${m.gap}px`);
     style.setProperty('--fs', `${m.fs.toFixed(2)}px`);
+    if (Math.round(m.colW) !== this.colW) {
+      // lets each picture pick the copy that's sharp enough for its column
+      this.colW = Math.round(m.colW);
+      for (const img of this.root.querySelectorAll<HTMLImageElement>('img[srcset]')) img.sizes = `${this.colW}px`;
+    }
 
     const order = this.order();
     const live = new Set(order.map((o) => o.id));
@@ -181,18 +192,60 @@ export class Grid {
   }
 
   private createCard(o: Obj): HTMLElement {
-    const el = document.createElement('article');
-    el.className = 'card list';
+    const el = document.createElement(o.kind === 'image' ? 'figure' : 'article');
+    el.className = `card ${o.kind}`;
     el.dataset.id = o.id;
     el.tabIndex = 0;
     el.setAttribute('role', 'button');
-    el.append(document.createElement('h2'), document.createElement('ul'));
+    if (o.kind === 'list') el.append(document.createElement('h2'), document.createElement('ul'));
     if (o.id === this.lifted) el.classList.add('lifted');
     this.renderCard(el, o);
     return el;
   }
 
   private renderCard(el: HTMLElement, o: Obj) {
+    if (o.kind === 'image') this.renderImage(el, o);
+    else this.renderList(el, o);
+  }
+
+  /**
+   * The card has the picture's exact shape from the start (so nothing shifts) and
+   * shows the blurred preview until the board copy arrives. Pictures this device
+   * added show from memory; others load lazily, sized to the column.
+   */
+  private renderImage(el: HTMLElement, o: Obj) {
+    const { w = 1, h = 1, ph, up } = o.data;
+    el.style.aspectRatio = `${w} / ${h}`;
+    if (ph) el.style.setProperty('--ph', `url("${ph}")`);
+
+    const local = this.uploads.localUrl(o.id, 'board');
+    if (!local && !up) return;
+    let img = el.querySelector('img');
+    if (img && (local || img.srcset)) return;
+    if (!img) {
+      img = document.createElement('img');
+      img.alt = '';
+      img.decoding = 'async';
+      img.loading = 'lazy';
+      img.draggable = false;
+      el.append(img);
+    }
+    const asked = performance.now();
+    img.onload = () => {
+      // already cached: no fade, it's simply there
+      if (performance.now() - asked < 80) img.style.transition = 'none';
+      img.classList.add('in');
+    };
+    if (local) {
+      img.src = local;
+    } else {
+      img.sizes = `${this.colW}px`;
+      img.srcset = `${imageUrl(o.id, 'board')} ${Math.min(BOARD_WIDTH, w)}w, ${imageUrl(o.id, 'full')} ${w}w`;
+      img.src = imageUrl(o.id, 'board');
+    }
+  }
+
+  private renderList(el: HTMLElement, o: Obj) {
     const h2 = el.firstElementChild as HTMLElement;
     const title = o.data.title ?? '';
     if (h2.textContent !== title) h2.textContent = title;

@@ -1,10 +1,10 @@
-import { generateKeyBetween } from 'fractional-indexing';
+import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing';
 import { newId } from '../../shared/protocol.ts';
-import type { ItemRow, ObjData, ObjRow, Op, ServerMsg, Snapshot } from '../../shared/protocol.ts';
+import type { ItemRow, Kind, ObjData, ObjRow, Op, ServerMsg, Snapshot } from '../../shared/protocol.ts';
 
 export interface Obj {
   id: string;
-  kind: 'list';
+  kind: Kind;
   ord: string;
   data: ObjData;
   del: 0 | 1;
@@ -125,6 +125,21 @@ export class Store {
     this.orderCache = null;
     this.touch().layout = true;
     return o;
+  }
+
+  /** Order keys for n new things at the very start of the board, in order. */
+  topKeys(n: number): string[] {
+    return generateNKeysBetween(null, this.ordered()[0]?.ord ?? null, n);
+  }
+
+  createImage(id: string, ord: string, image: { w: number; h: number; ph: string }) {
+    this.local({ k: 'o', id, kind: 'image', ord, data: { ...image, up: 0 } });
+  }
+
+  /** Every copy is on the server now: the other device can load it. */
+  imageUploaded(id: string) {
+    const o = this.objs.get(id);
+    if (o?.kind === 'image' && !o.data.up) this.local({ k: 'o', id, data: { ...o.data, up: 1 } });
   }
 
   setTitle(id: string, title: string) {

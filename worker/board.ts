@@ -5,6 +5,8 @@ import type {
   ClientMsg,
   ItemOp,
   ItemRow,
+  Kind,
+  ObjData,
   ObjOp,
   ObjRow,
   Op,
@@ -33,12 +35,26 @@ const SEED: [string, string[]][] = [
 
 const objRow = (r: ObjSql): ObjRow => ({
   id: r.id,
-  kind: 'list',
+  kind: r.kind as Kind,
   ord: r.ord,
   data: JSON.parse(r.data),
   del: r.del ? 1 : 0,
   seq: r.seq,
 });
+
+const KINDS: readonly string[] = ['list', 'image'] satisfies Kind[];
+
+/** Keeps only the fields a kind of object has, within limits; null if unusable. */
+function cleanData(kind: string, data: ObjData | undefined): ObjData | null {
+  if (kind === 'list') {
+    return { title: typeof data?.title === 'string' ? data.title.slice(0, LIMITS.title) : '' };
+  }
+  const w = Math.round(Number(data?.w));
+  const h = Math.round(Number(data?.h));
+  if (!(w >= 1 && w <= 20000 && h >= 1 && h <= 20000)) return null;
+  const ph = typeof data?.ph === 'string' && data.ph.startsWith('data:image/') && data.ph.length <= LIMITS.placeholder ? data.ph : '';
+  return { w, h, ph, up: data?.up ? 1 : 0 };
+}
 
 const itemRow = (r: ItemSql): ItemRow => ({
   id: r.id,
@@ -149,15 +165,20 @@ export class Board extends DurableObject<Env> {
   private applyObj(op: ObjOp): ObjRow | null {
     if (typeof op.id !== 'string' || !ID_RE.test(op.id)) return null;
     const cur = this.sql.exec<ObjSql>('SELECT * FROM objects WHERE id = ?', op.id).toArray()[0];
-    if (!cur && op.kind !== 'list') return null;
+    const kind = cur?.kind ?? op.kind;
+    if (!kind || !KINDS.includes(kind)) return null;
     const ord = typeof op.ord === 'string' && ORD_RE.test(op.ord) ? op.ord : cur?.ord;
     if (!ord) return null;
-    const data =
-      op.data !== undefined
-        ? JSON.stringify({ title: typeof op.data?.title === 'string' ? op.data.title.slice(0, LIMITS.title) : '' })
-        : (cur?.data ?? '{}');
+    let data = cur?.data ?? '{}';
+    if (op.data !== undefined) {
+      const clean = cleanData(kind, op.data);
+      if (clean) data = JSON.stringify(clean);
+      else if (!cur) return null;
+    } else if (!cur && kind === 'image') {
+      return null; // an image can't exist without its size
+    }
     const del = op.del === 1 || op.del === 0 ? op.del : cur?.del ? 1 : 0;
-    const row: ObjSql = { id: op.id, kind: 'list', ord, data, del, seq: ++this.seq };
+    const row: ObjSql = { id: op.id, kind, ord, data, del, seq: ++this.seq };
     this.sql.exec(
       `INSERT INTO objects (id, kind, ord, data, del, seq) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET ord = excluded.ord, data = excluded.data, del = excluded.del, seq = excluded.seq`,

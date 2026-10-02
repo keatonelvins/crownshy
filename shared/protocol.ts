@@ -1,14 +1,21 @@
 // Wire format shared by the board client and its Durable Object.
 //
-// The board is a set of objects (only lists for now) and list items. Every row
+// The board is a set of objects (lists and images) and list items. Every row
 // carries the server sequence number of its last change, so a client that
 // reconnects can ask for exactly the rows it missed. Deletes are tombstones
 // (del: 1) so they travel the same way.
 
-export type Kind = 'list';
+export type Kind = 'list' | 'image';
 
 export interface ObjData {
+  // lists
   title?: string;
+  // images: size of the full copy, a tiny blurred preview (data URL), and
+  // whether both copies have finished uploading
+  w?: number;
+  h?: number;
+  ph?: string;
+  up?: 0 | 1;
 }
 
 export interface ObjRow {
@@ -74,7 +81,19 @@ export const LIMITS = {
   title: 300,
   text: 4000,
   opsPerBatch: 500,
+  // the blurred preview travels inside every board snapshot, so keep it tiny
+  placeholder: 2000,
+  // one stored copy of an image (a row in the image store)
+  imageBytes: 2_000_000,
 };
+
+// Each image is stored twice: the full copy (long edge at most FULL_EDGE) for
+// viewing, and a board copy at most BOARD_WIDTH wide.
+export const FULL_EDGE = 2048;
+export const BOARD_WIDTH = 720;
+export type ImageCopy = 'full' | 'board';
+
+export const imageUrl = (id: string, copy: ImageCopy) => `/board/img/${id}/${copy}`;
 
 export const ID_RE = /^[0-9A-Za-z]{8,32}$/;
 export const ORD_RE = /^[0-9A-Za-z]{1,128}$/;

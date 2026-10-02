@@ -6,6 +6,7 @@
 
 const PAGES = 'board-pages-v1';
 const ASSETS = 'board-assets-v1';
+const IMAGES = 'board-images-v1';
 const BOARD_PATH = /^\/board(\/[0-9A-Za-z]{8,32})?\/?$/;
 
 // The background refresh in flight, if any.
@@ -33,7 +34,10 @@ self.addEventListener('fetch', (e) => {
   if (req.mode === 'navigate' && BOARD_PATH.test(url.pathname)) {
     e.respondWith(page(e));
   } else if (/^\/(assets|fonts)\/|^\/board-icon/.test(url.pathname)) {
-    e.respondWith(asset(req));
+    e.respondWith(asset(req, ASSETS));
+  } else if (url.pathname.startsWith('/board/img/')) {
+    // a stored copy of a picture never changes either
+    e.respondWith(asset(req, IMAGES));
   }
 });
 
@@ -58,13 +62,14 @@ async function page(e) {
   return cached;
 }
 
-// Hashed files never change, so once fetched they're served from the cache.
-async function asset(req) {
-  const cache = await caches.open(ASSETS);
-  const hit = await cache.match(req);
+// Hashed files and picture copies never change, so once fetched they're served
+// from the cache.
+async function asset(req, name) {
+  const cache = await caches.open(name);
+  const hit = await cache.match(req.url);
   if (hit) return hit;
   const res = await fetch(req);
-  if (res.ok) await cache.put(req, res.clone());
+  if (res.ok) await cache.put(req.url, res.clone());
   return res;
 }
 

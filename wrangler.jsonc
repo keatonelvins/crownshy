@@ -14,9 +14,15 @@
 		"run_worker_first": ["/board", "/board/*"]
 	},
 	"durable_objects": {
-		"bindings": [{ "name": "BOARD", "class_name": "Board" }]
+		"bindings": [
+			{ "name": "BOARD", "class_name": "Board" },
+			{ "name": "IMAGES", "class_name": "Images" }
+		]
 	},
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["Board"] }],
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["Board"] },
+		{ "tag": "v2", "new_sqlite_classes": ["Images"] }
+	],
 	"routes": [
 		{ "pattern": "crownshypress.com", "custom_domain": true },
 		{ "pattern": "www.crownshypress.com", "custom_domain": true }
