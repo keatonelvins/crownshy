@@ -1,0 +1,48 @@
+:root {
+  --text: #3a3a3a;
+  --muted: #8a8a8a;
+  --bg: #faf8f4;
+
+  font: 18px/1.5 ui-serif, Georgia, serif;
+  color-scheme: light dark;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #e8e6e1;
+    --muted: #8f8c86;
+    --bg: #161514;
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+main {
+  padding: 0 16px;
+  text-align: center;
+}
+
+h1 {
+  font-weight: 400;
+  font-size: 2.5rem;
+  margin: 0 0 0.5rem;
+}
+
+p {
+  margin: 0.25rem 0;
+}
+
+.status {
+  margin-top: 1.5rem;
+  font: 0.8rem ui-monospace, monospace;
+  color: var(--muted);
+}
