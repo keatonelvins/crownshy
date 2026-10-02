@@ -1,9 +1,24 @@
+/* ABC Areal Superfamily: one variable file with four axes.
+   MONO 0–100 (proportional → semi mono → mono), wght 400–700,
+   slnt 0 to -12 (CSS oblique 0–12deg), DRKM 0–1 (dark mode grade). */
+@font-face {
+  font-family: 'Areal';
+  src: url('/fonts/ABCArealSuperfamilyVariable.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: oblique 0deg 12deg;
+  font-display: swap;
+}
+
 :root {
   --text: #3a3a3a;
   --muted: #8a8a8a;
   --bg: #faf8f4;
 
-  font: 18px/1.5 ui-serif, Georgia, serif;
+  /* Custom axes, set per element: 0 = proportional, 50 = semi mono, 100 = mono */
+  --mono: 0;
+  --drkm: 0;
+
+  font: 18px/1.5 'Areal', system-ui, sans-serif;
   color-scheme: light dark;
   color: var(--text);
   background: var(--bg);
@@ -15,7 +30,32 @@
     --text: #e8e6e1;
     --muted: #8f8c86;
     --bg: #161514;
+    --drkm: 1;
   }
+}
+
+/* Declared on every element so a --mono change applies where it's set. */
+*,
+*::before,
+*::after {
+  font-variation-settings: 'MONO' var(--mono), 'DRKM' var(--drkm);
+}
+
+em,
+i {
+  font-style: oblique 12deg;
+}
+
+.semi-mono {
+  --mono: 50;
+}
+
+.mono,
+code,
+kbd,
+pre {
+  --mono: 100;
+  font-family: inherit;
 }
 
 body {
@@ -32,7 +72,7 @@ main {
 }
 
 h1 {
-  font-weight: 400;
+  font-weight: 500;
   font-size: 2.5rem;
   margin: 0 0 0.5rem;
 }
@@ -43,6 +83,6 @@ p {
 
 .status {
   margin-top: 1.5rem;
-  font: 0.8rem ui-monospace, monospace;
+  font-size: 0.8rem;
   color: var(--muted);
 }

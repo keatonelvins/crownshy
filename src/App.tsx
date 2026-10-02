@@ -14,7 +14,7 @@ function App() {
     <main>
       <h1>crownshy press</h1>
       <p>a coworking space for two. coming soon.</p>
-      <p className="status">{status}</p>
+      <p className="status mono">{status}</p>
     </main>
   )
 }
