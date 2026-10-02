@@ -1,0 +1,279 @@
+/* Same superfamily as the homepage (see src/index.css for the axes). */
+@font-face {
+  font-family: 'Areal';
+  src: url('/fonts/ABCArealSuperfamilyVariable.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: oblique 0deg 12deg;
+  font-display: swap;
+}
+
+:root {
+  --bed: #060707;
+  --mono: 0;
+  --pad: 28px;
+  --gap: 22px;
+  --fs: 14px;
+
+  color-scheme: dark;
+  background: var(--bed);
+  font-family: 'Areal', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  /* 0 = proportional, 50 = semi mono, 100 = mono */
+  font-variation-settings: 'MONO' var(--mono);
+}
+
+body {
+  margin: 0;
+  min-height: 100svh;
+}
+
+/* The scanner bed: glass with the lid up, a little sensor noise, light falling off at the edges. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .55  0 0 0 0 .62  0 0 0 0 .6  0 0 0 .55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='.16'/></svg>"),
+    radial-gradient(110% 80% at 30% 35%, #151918 0%, #0c0e0e 55%, #050606 100%);
+}
+
+html.sheet-open {
+  overflow: hidden;
+}
+
+/* ---------- board ---------- */
+
+#board {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap);
+  padding: var(--pad);
+  padding-top: max(var(--pad), env(safe-area-inset-top));
+  padding-bottom: 96px;
+  font-size: var(--fs);
+}
+
+.col {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.card {
+  background: #fff;
+  color: #000;
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.25), 0 0 22px rgba(220, 235, 230, 0.07);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+/* picked up: a floating copy above everything, lit a little harder, out of the way of hit-testing */
+.card.ghost {
+  position: fixed;
+  z-index: 20;
+  margin: 0;
+  pointer-events: none;
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.3), 0 18px 50px rgba(0, 0, 0, 0.65);
+}
+
+.card.ghost.away {
+  opacity: 0.55;
+}
+
+/* where the picked-up card will land */
+.card.slot {
+  visibility: hidden;
+}
+
+html.dragging,
+html.dragging * {
+  cursor: grabbing;
+}
+
+.card:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+.card.lifted {
+  visibility: hidden;
+}
+
+.list {
+  padding: 1.05em 1.15em 1.35em;
+  line-height: 1.42;
+}
+
+.list h2 {
+  margin: 0 0 0.5em;
+  font-size: 1.1em;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
+}
+
+.list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list li {
+  --mono: 50;
+  padding: 0.12em 0;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- the one control ---------- */
+
+#add {
+  position: fixed;
+  right: max(4px, env(safe-area-inset-right));
+  bottom: max(4px, env(safe-area-inset-bottom));
+  z-index: 25;
+  width: 52px;
+  height: 52px;
+  padding: 15px;
+  border: 0;
+  background: none;
+  color: #fff;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#add svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#add:focus-visible {
+  outline: 1px solid rgba(255, 255, 255, 0.6);
+  outline-offset: -6px;
+}
+
+/* While a card is being dragged, the + turns into a × to drop it on. */
+html.dragging #add svg {
+  transform: rotate(45deg) scale(1.1);
+}
+
+html.dragging #add.hot svg {
+  transform: rotate(45deg) scale(1.6);
+}
+
+html.sheet-open #add {
+  z-index: 5;
+}
+
+/* ---------- a list lifted off the board ---------- */
+
+.focus {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+.veil {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.62);
+  touch-action: none;
+}
+
+.sheet {
+  --w: min(560px, calc(100vw - 48px));
+  --top: max(48px, 10vh);
+  --bottom: 48px;
+
+  position: absolute;
+  left: calc(50% - var(--w) / 2);
+  top: calc(var(--vvt, 0px) + var(--top));
+  width: var(--w);
+  max-height: calc(var(--vvh, 100dvh) - var(--top) - var(--bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #fff;
+  color: #000;
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.25), 0 24px 80px rgba(0, 0, 0, 0.55);
+  transform-origin: 0 0;
+  font-size: 18px;
+  line-height: 1.42;
+}
+
+@media (max-width: 599px) {
+  .sheet {
+    --w: calc(100vw - 20px);
+    --top: calc(env(safe-area-inset-top) + 10px);
+    --bottom: 10px;
+    font-size: 17px;
+  }
+}
+
+.inner {
+  padding: 1.05em 1.15em 1.35em;
+}
+
+.sheet textarea {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.12em 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  /* the font shorthand resets the axes, so set them again */
+  font-variation-settings: 'MONO' var(--mono);
+  line-height: inherit;
+  letter-spacing: inherit;
+  caret-color: #000;
+  resize: none;
+  overflow: hidden;
+  field-sizing: content;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.sheet .title {
+  margin-bottom: 0.5em;
+  padding: 0;
+  font-size: 1.1em;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+}
+
+.sheet .line {
+  --mono: 50;
+  letter-spacing: -0.01em;
+}
+
+.sheet ::selection {
+  background: rgba(0, 0, 0, 0.14);
+}
