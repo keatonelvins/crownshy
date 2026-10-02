@@ -80,9 +80,3 @@ h1 {
 p {
   margin: 0.25rem 0;
 }
-
-.status {
-  margin-top: 1.5rem;
-  font-size: 0.8rem;
-  color: var(--muted);
-}
